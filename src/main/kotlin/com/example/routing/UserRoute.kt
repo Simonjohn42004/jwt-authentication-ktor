@@ -5,6 +5,9 @@ import com.example.routing.request.UserRequest
 import com.example.routing.response.UserResponse
 import com.example.service.UserService
 import io.ktor.http.*
+import io.ktor.server.auth.authenticate
+import io.ktor.server.auth.jwt.JWTPrincipal
+import io.ktor.server.auth.principal
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
@@ -18,8 +21,8 @@ fun Route.userRoute(userService: UserService) {
             user = userRequest.toModel()
         )
 
-        if(user == null){
-            call.respond(HttpStatusCode.BadRequest,)
+        if (user == null) {
+            call.respond(HttpStatusCode.BadRequest)
             return@post
         }
         call.response.header(
@@ -30,28 +33,44 @@ fun Route.userRoute(userService: UserService) {
         call.respond(HttpStatusCode.Created)
     }
 
-    get {
-        val users = userService.findAll()
+    authenticate("Authentication") {
 
-        call.respond(users.map {
-            it.toResponse()
-        })
+        get {
+            val users = userService.findAll()
+
+            call.respond(users.map {
+                it.toResponse()
+            })
+        }
+
+        get("/{id}") {
+            val idByText = call.parameters["id"]
+            if (idByText == null) {
+                call.respond(HttpStatusCode.BadRequest)
+                return@get
+            }
+            val userFound = userService.findById(idByText)
+            if (userFound == null) {
+                call.respond(HttpStatusCode.NotFound)
+                return@get
+            }
+
+            if (userFound.userName != extractPrincipalUserName(call)){
+                call.respond(HttpStatusCode.NotFound)
+                return@get
+            }
+
+                call.respond(userFound.toResponse())
+        }
     }
 
-    get("/{id}"){
-        val idByText = call.parameters["id"]
-        if(idByText == null){
-            call.respond(HttpStatusCode.BadRequest)
-            return@get
-        }
-        val userFound = userService.findById(idByText)
-        if (userFound == null){
-            call.respond(HttpStatusCode.NotFound)
-            return@get
-        }
-        call.respond(userFound)
-    }
+}
 
+private fun RoutingContext.extractPrincipalUserName(call: RoutingCall): String? {
+    return call.principal<JWTPrincipal>()
+        ?.payload
+        ?.getClaim("userName")
+        ?.asString()
 }
 
 private fun UserRequest.toModel(): User {
@@ -62,7 +81,7 @@ private fun UserRequest.toModel(): User {
     )
 }
 
-private fun User.toResponse(): UserResponse{
+private fun User.toResponse(): UserResponse {
     return UserResponse(
         id = id,
         userName = userName
